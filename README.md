@@ -1,54 +1,46 @@
-# pingai-plugins
+# PingAI 插件内容 · 加密分发仓
 
-PingAI 的 plugin / skill / MCP **内容资产仓库**（私有）。
+本仓是 PingAI 插件/技能内容（skill body 等）的**加密分发（CDN）仓库** —— 也是
+`CONTENT_CDN_BASE_URL` 默认指向的 `main` 分支 raw 根。
 
-> 这是「内容资产」仓库，**不放工程代码**。MCP 网关服务、后端接口、admin 管理页等
-> 代码在 `pingai-core`，不进本仓库。
+## 里面是什么
 
-## 两个区（边界约定）
-
-| | ① 自研区 `skills/` + `mcp/` | ② 第三方区 `mirror/` |
-|---|---|---|
-| 内容 | PingAI 自己的 skill / MCP | 第三方开源仓库镜像 |
-| 接分发？ | ✅ 是，同步进 `app.plugins` 表 | ❌ 否，纯备份防失效 |
-| 维护 | 运营 / 内容团队直接编辑 | 脚本定期 pull 上游 release |
-| 授权 | PingAI 自有 | 保留上游 license |
-| 更新 | 编辑 + 升版本号 | 定期 fetch |
-
-## 目录结构
+只有生成器摊的**密文树**：
 
 ```
-.
-├── skills/          # ① 自研 skill（内容源）
-│   └── <skill-id>/
-│       ├── skill.md       # 提示词 / 工作流主体
-│       └── manifest.json  # id / 名称 / 描述 / 分类 / 版本 / install_cmd
-├── mcp/             # ① 自研 / 托管 MCP 定义（若走 C 方向）
-│   └── <mcp-id>/
-│       ├── server.json    # transport / url / config
-│       └── manifest.json
-├── mirror/          # ② 第三方开源备份（纯镜像，不接分发）
-│   └── <upstream-org>-<repo>/
-├── catalog/
-│   └── catalog.json       # 自研区编译产物（脚本生成，勿手改）
-└── scripts/
-    └── sync-to-db.ts      # 仓库 → app.plugins 表的同步脚本
+skills/<id>/content/
+  ├── index.json    # 该技能内容包的清单（也是密文）
+  └── SKILL.md      # 技能正文（密文）
 ```
 
-## 分发链路
+`index.json` / `SKILL.md` 的**内容**一律是 AES-256-GCM 密文（base64），`curve` 如下：
 
 ```
-自研区（skills/ + mcp/，唯一真相源）
-   └─ scripts/sync-to-db.ts 编译 → catalog/catalog.json
-        └─ 迁移/seed 灌进 app.plugins 表
-             └─ 后端 GET /v1/me/plugins 读表分发 → 桌面端写 ~/.claude.json
+加密:  sha256(明文) —— 生成器先算 hash 再加密
+       明文正文 --AES-256-GCM(每插件派生 key)--> 密文(base64)  ← 本仓存这个
+解密:  客户端下载密文 --AES-256-GCM(相同派生 key)--> 明文
+       再 sha256(明文) === 目录 pin 的 content_sha256 → 通过才注入
 ```
 
-> 当前后端目录是 `pingai-backend/src/v1/me/plugins.ts` 里的**硬编码 mock**。
-> 迁表第一步就是把那 18 条自研 IG skill + 4 条 MCP 从 mock 搬进本仓库的
-> `skills/` / `mcp/`，让 mock 有个真实归宿。
+- **每插件一把 key**：由服务端专用 `CONTENT_KEY_SECRET` 按 `pluginId:version` HMAC-SHA256 派生，
+  不写 git、不落库、不下内置客户端——客户端只在**订阅门禁通过**时按次拿到。
+- **明文正文一律私有保有、绝不进本仓**（详见 `.gitignore`：只有 `skills/<id>/content/**` 能进树）。
 
-## MCP 定位（未拍板）
+## 用途
 
-MCP 定位见 `pingai-core/docs/mcp-positioning.md`（待拍板，内部三种分裂说法）。
-本仓库结构先按「内容源」设计，MCP 的 `server.json` 字段等定位定了再补。
+- 后端在目录响应里下发 `components[].content_url = <CONTENT_CDN_BASE_URL>/skills/<id>/content`。
+- 客户端据此从本仓（GitHub raw）拉取密文，本地用订阅门禁下发的 `content_key` 解密、校验 sha、注入宿主。
+
+## 改/发布姿势
+
+明文源在**本地私有目录**维护（`pingai-core/pingai-plugins/skills/<id>/SKILL.md`）。要发布：
+
+```bash
+# pingai-backend 下，用与部署后端【同一把】CONTENT_KEY_SECRET
+CONTENT_KEY_SECRET=<与后端一致> npx tsx _gen-plugins-sync.mts \
+  --repo <明文本地源> --dist <本仓clone根>
+# → 摊出 skills/<id>/content/* 密文树到 clone，提交 + 推送 main
+```
+
+🔴 顺序：**先发布密文到本仓**，**再**在部署后端开 `CONTENT_CDN_BASE_URL`——否则客户端
+GitHub 404 会静默退 `no-index` 本地占位（看似上映、其实没东西可下）。

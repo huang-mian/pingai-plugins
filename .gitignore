@@ -1,10 +1,17 @@
-# 依赖
-node_modules/
+# huang-mian/pingai-plugins —— 插件内容【加密分发】公开仓
+#
+# 本仓只装生成器 --dist 摊出的密文树：skills/<id>/content/{index.json, SKILL.md}，
+# 文件全是 AES-256-GCM 密文（base64）。明文正文（SKILL.md / manifest.json 等）一律
+# 私有保有、永不进本仓 —— 下面这套规则就是那道硬闸：只有 content/ 目录里的东西能进树。
 
-# 系统文件
-.DS_Store
-Thumbs.db
+# 默认忽略一切，逐个放行
+*
+!README.md
+!.gitignore
+!skills/
+!skills/**/
+!skills/**/content/
+!skills/**/content/**
 
-# 临时
-*.tmp
-*.log
+# 明文形态即便误放在 work tree 里也被拦（skills/<id>/*.md、*.json 等都不在 content/ 下）
+# 提交前务必 git status 核对：出现 skills/<id>/SKILL.md（不在 content 子目录）即为泄漏。
